@@ -1,0 +1,48 @@
+[package]
+name = "audio-player"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proc-macro2 = "1.0.89"
+quote = "1.0.37"
+rand = { version = "0.8.5", features = ["std_rng"] }
+reqwest = "0.12.9"
+rodio = { version = "0.20.1", features = ["minimp3"] }
+tokio = { version = "1.41.1", features = ["macros", "rt-multi-thread"] }
+url = "2.5.3"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[lib]
+proc-macro = true
+
+[[bin]]
+name = "compiled"
+path = "src/compiled.rs"
+
+[[bin]]
+name = "test"
+path = "src/test.rs"
+
+[[bin]]
+name = "web"
+path = "src/web.rs"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+missing_crate_level_docs = "warn"
+private_doc_tests = "warn"
+unescaped_backticks = "warn"
