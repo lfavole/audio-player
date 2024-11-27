@@ -1,5 +1,14 @@
-use std::{collections::HashMap, fs::File, future::Future, io::{Cursor, Read, Seek}, path::Path, sync::Mutex};
-use reqwest::{Client, Url};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{Cursor, Read, Seek},
+    path::Path,
+    sync::Mutex,
+};
+use ureq::Agent;
+use url::Url;
+
+pub type EBox = Box<dyn std::error::Error + Send + Sync>;
 
 /// Return the "real name" of a song, that is to say
 /// the part after the song number, if there is one.
@@ -7,27 +16,24 @@ fn get_real_name(path: &str) -> Option<&str> {
     let mut name = path;
 
     // Keep only the basename (everything after the last slash)
-    name = name.rsplit_once('/').map_or(name, | x | x.1);
+    name = name.rsplit_once('/').map_or(name, |x| x.1);
 
     // Keep only the file name (everything before the last dot)
-    name = name.rsplit_once('.').map_or(name, | x | x.0);
+    name = name.rsplit_once('.').map_or(name, |x| x.0);
 
     // Return the real name (everything after the first underscore) or None
-    name.split_once('_').map(| x | x.1)
+    name.split_once('_').map(|x| x.1)
 }
 
-pub type EBox = Box<dyn std::error::Error + Send + Sync>;
 pub trait Song<'name>: Sized {
-    async fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox>;
+    fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox>;
     fn get_path(&self) -> &'name str;
 
     fn get_real_name(&self) -> Option<&'name str> {
         get_real_name(self.get_path())
     }
-    fn preload(&mut self) -> impl Future<Output = Result<(), EBox>> + Send + 'static {
-        async {
-            Ok(())
-        }
+    fn preload(&mut self) -> Result<(), EBox> {
+        Ok(())
     }
 }
 
@@ -38,11 +44,14 @@ pub struct CompiledSong<'name: 'static> {
 }
 impl<'name> CompiledSong<'name> {
     pub fn new(path: &'name str) -> Self {
-        Self { path, contents: &[] }
+        Self {
+            path,
+            contents: &[],
+        }
     }
 }
 impl<'name> Song<'name> for CompiledSong<'name> {
-    async fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
+    fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
         Ok(Cursor::new(self.contents))
     }
     fn get_path(&self) -> &'name str {
@@ -50,43 +59,50 @@ impl<'name> Song<'name> for CompiledSong<'name> {
     }
 }
 
-pub struct FileSong<'a> {
-    pub path: &'a Path,
+pub struct FileSong<'name> {
+    pub path: &'name Path,
 }
 impl<'name> Song<'name> for FileSong<'name> {
-    async fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
+    fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
         Ok(File::open(self.path)?)
     }
     fn get_path(&self) -> &'name str {
-        self.path.to_str().unwrap()  // FIXME
+        self.path.to_str().unwrap() // FIXME
     }
 }
 
-pub struct WebSong {
-    pub url: Url,
-    pub client: Client,
+pub struct WebSong<'name, 'agent> {
+    pub url: &'name Url,
+    pub agent: &'agent Agent,
     pub data: Vec<u8>,
     preloading: Mutex<()>,
 }
-impl WebSong {
-    pub fn new(url: Url, client: Client) -> Self {
-        Self { url, client, data: vec![], preloading: Mutex::new(()) }
+impl<'name, 'agent> WebSong<'name, 'agent> {
+    pub fn new(url: &'name Url, agent: &'agent Agent) -> Self {
+        Self {
+            url,
+            agent,
+            data: vec![],
+            preloading: Mutex::new(()),
+        }
     }
 }
-impl Song<'_> for WebSong {
-    async fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
-        self.preload().await?;
+impl<'name, 'agent> Song<'name> for WebSong<'name, 'agent> {
+    fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
+        self.preload()?;
         Ok(Cursor::new(self.data.clone()))
     }
-    async fn preload(&mut self) -> impl Future<Output = Result<(), EBox>> + Send + 'static {
-        self.preloading.lock().unwrap();
+    fn preload(&mut self) -> Result<(), EBox> {
+        let _lock = self.preloading.lock().unwrap();
         if !self.data.is_empty() {
             return Ok(());
         }
-        let mut resp = self.client.get(self.url.clone()).send().await?;
-        while let Some(chunk) = resp.chunk().await? {
-            self.data.extend_from_slice(&chunk[..]);
-        }
+        let mut resp = self
+            .agent
+            .request_url("GET", self.url)
+            .call()?
+            .into_reader();
+        resp.read_to_end(&mut self.data)?;
         Ok(())
     }
     fn get_path(&self) -> &'name str {
@@ -103,7 +119,10 @@ fn get_double_songs<'name>(files: &mut [impl Song<'name>]) -> HashMap<&'name str
             *filenames.entry(real_name).or_default() += 1;
         }
     }
-    filenames.into_iter().filter(| x | x.1 >= 2).collect::<HashMap<_, _>>()
+    filenames
+        .into_iter()
+        .filter(|x| x.1 >= 2)
+        .collect::<HashMap<_, _>>()
 }
 
 /// Change the queue order to put double songs far from each other.
@@ -134,7 +153,8 @@ pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
                             for j in 0..length {
                                 // If there is a song far enough and not another double song...
                                 if j.abs_diff(i) >= min_threshold
-                                && files[j].get_real_name().unwrap_or_default() != real_name {
+                                    && files[j].get_real_name().unwrap_or_default() != real_name
+                                {
                                     // Swap the songs...
                                     files.swap(i, j);
                                     // ...and move the last file to the start
@@ -156,14 +176,26 @@ pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_double_songs, Song, CompiledSong};
+    use super::{check_double_songs, CompiledSong, Song};
 
     #[test]
     fn real_name() {
-        assert_eq!(CompiledSong::new("test/00_a.mp3").get_real_name(), Some("a"));
-        assert_eq!(CompiledSong::new("test/a/b/00_c.mp3").get_real_name(), Some("c"));
-        assert_eq!(CompiledSong::new("test/00_a.test.mp3").get_real_name(), Some("a.test"));
-        assert_eq!(CompiledSong::new("test/00_a_test.mp3").get_real_name(), Some("a_test"));
+        assert_eq!(
+            CompiledSong::new("test/00_a.mp3").get_real_name(),
+            Some("a")
+        );
+        assert_eq!(
+            CompiledSong::new("test/a/b/00_c.mp3").get_real_name(),
+            Some("c")
+        );
+        assert_eq!(
+            CompiledSong::new("test/00_a.test.mp3").get_real_name(),
+            Some("a.test")
+        );
+        assert_eq!(
+            CompiledSong::new("test/00_a_test.mp3").get_real_name(),
+            Some("a_test")
+        );
 
         assert_eq!(CompiledSong::new("test/00.mp3").get_real_name(), None);
         assert_eq!(CompiledSong::new("test/test.mp3").get_real_name(), None);
@@ -174,7 +206,7 @@ mod tests {
     fn double_songs() {
         let songs = &mut ["a", "b", "a", "c", "d", "e", "f"].map(CompiledSong::new);
         check_double_songs(&mut songs[..]);
-        let paths: Vec<_> = songs.iter().map(| x | x.path).collect();
+        let paths: Vec<_> = songs.iter().map(|x| x.path).collect();
         assert_eq!(&paths, &["a", "b", "c", "a", "d", "e", "f"]);
     }
 }

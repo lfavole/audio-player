@@ -1,12 +1,13 @@
 //! Code for the `include_songs!` macro.
 extern crate proc_macro;
+use files::RecurseFilesIterator;
 use std::path::PathBuf;
-use files::recurse_files;
 
 use proc_macro::{TokenStream, TokenTree};
 use quote::quote;
 
 mod files;
+mod song;
 
 /// Return a slice of `Song`s that are in a specified directory.
 /// The songs are embedded into the program.
@@ -20,12 +21,14 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
     let path: PathBuf = match tokens.as_slice() {
         [TokenTree::Literal(lit)] => unwrap_string_literal(lit),
         _ => panic!("This macro only accepts a single, non-empty string argument"),
-    }.into();
-    let files = recurse_files(&path).unwrap();
+    }
+    .into();
+    let files = RecurseFilesIterator::new(&path).unwrap();
 
     let mut tokens = vec![];
 
     for file in files {
+        let file = file.unwrap();
         if file.extension().unwrap_or_default() != "mp3" {
             continue;
         }
@@ -36,12 +39,16 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
 
     quote! {
         &[#(#tokens),*]
-    }.into()
+    }
+    .into()
 }
 
 fn unwrap_string_literal(lit: &proc_macro::Literal) -> String {
     let mut repr = lit.to_string();
-    assert!(repr.starts_with('"') && repr.ends_with('"'), "This macro only accepts a single, non-empty string argument");
+    assert!(
+        repr.starts_with('"') && repr.ends_with('"'),
+        "This macro only accepts a single, non-empty string argument"
+    );
     repr.remove(0);
     repr.pop();
     repr

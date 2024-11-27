@@ -1,7 +1,7 @@
 //! Play the songs in a specified folder.
 use std::path::Path;
 
-use files::recurse_files;
+use files::RecurseFilesIterator;
 use play::play_songs;
 use song::{EBox, FileSong};
 
@@ -11,13 +11,15 @@ mod song;
 
 const FOLDER: &str = "splitted";
 
-#[tokio::main]
-async fn main() -> Result<(), EBox> {
-    let files = recurse_files(Path::new(FOLDER))?;
-    let mut songs = files.iter()
-    .filter(| x | x.extension().unwrap_or_default() == "mp3")
-    .map(| x | FileSong { path: x.as_path() })
-    .collect::<Vec<_>>();
+fn main() -> Result<(), EBox> {
+    let files = RecurseFilesIterator::new(Path::new(FOLDER))?.collect::<Result<Vec<_>, _>>()?;
+    let mut songs = files
+        .iter()
+        .filter(|file| file.extension().is_some_and(|ext| ext == "mp3"))
+        .map(|file| FileSong {
+            path: file.as_path(),
+        })
+        .collect::<Vec<_>>();
 
-    play_songs(&mut songs[..]).await
+    play_songs(&mut songs[..])
 }

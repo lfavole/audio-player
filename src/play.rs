@@ -1,9 +1,16 @@
+use std::time::SystemTime;
+
 use rodio::{Decoder, OutputStream, Sink, Source};
-use rand::prelude::*;
+use tinyrand::{Rand, Seeded, StdRand};
+
 use crate::song::{check_double_songs, EBox, Song};
 
-pub async fn play_songs<'name, T: Song<'name>>(songs: &mut [T]) -> Result<(), EBox> {
-    let mut rng = thread_rng();
+pub fn play_songs<'name, T: Song<'name>>(songs: &mut [T]) -> Result<(), EBox> {
+    let mut rng = StdRand::seed(
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs(),
+    );
     let (_stream, stream_handle) = OutputStream::try_default()?;
     let sink = Sink::try_new(&stream_handle)?;
 
@@ -11,19 +18,27 @@ pub async fn play_songs<'name, T: Song<'name>>(songs: &mut [T]) -> Result<(), EB
     let length = queue.len();
     let mut position = 0;
 
+    if length == 0 {
+        println!("No songs to play");
+        return Ok(());
+    }
+
     loop {
         if position == 0 {
-            queue.shuffle(&mut rng);
+            // Shuffle the queue
+            for i in (1..length).rev() {
+                queue.swap(i, rng.next_lim_usize(i + 1));
+            }
             check_double_songs(queue);
         }
         let song = &mut queue[position];
         println!("{}", song.get_path());
 
-        let source = Decoder::new_mp3(song.get_data().await?)?.buffered();
+        let source = Decoder::new_mp3(song.get_data()?)?.buffered();
         sink.append(source);
 
         if position + 1 != length {
-            queue[position + 1].preload().await?;
+            queue[position + 1].preload()?;
         }
 
         sink.sleep_until_end();
