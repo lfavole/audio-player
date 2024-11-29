@@ -1,16 +1,6 @@
-[package]
-name = "audio-player"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-proc-macro2 = "1.0.89"
-quote = "1.0.37"
-rayon = "1.10.0"
-rodio = { version = "0.20.1", features = ["minimp3"] }
-tinyrand = "0.5.0"
-ureq = "2.10.1"
-url = "2.5.3"
+[workspace]
+members = ["audio_player", "files", "macros"]
+resolver = "2"
 
 [profile.dev]
 opt-level = 1
@@ -24,30 +14,16 @@ opt-level = "z"
 lto = true
 panic = "abort"
 
-[lib]
-proc-macro = true
-
-[[bin]]
-name = "compiled"
-path = "src/compiled.rs"
-
-[[bin]]
-name = "test"
-path = "src/test.rs"
-
-[[bin]]
-name = "web"
-path = "src/web.rs"
-
-[lints.clippy]
+[workspace.lints.clippy]
 all = "warn"
 pedantic = "warn"
 
-[lints.rust]
+[workspace.lints.rust]
 missing_docs = "warn"
 
-[lints.rustdoc]
-broken_intra_doc_links = "warn"
+[workspace.lints.rustdoc]
+missing_docs = "warn"
 missing_crate_level_docs = "warn"
+missing_doc_code_examples = "warn"
 private_doc_tests = "warn"
 unescaped_backticks = "warn"

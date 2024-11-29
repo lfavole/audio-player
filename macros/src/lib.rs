@@ -1,13 +1,9 @@
 //! Code for the `include_songs!` macro.
-extern crate proc_macro;
 use files::RecurseFilesIterator;
 use std::path::PathBuf;
 
 use proc_macro::{TokenStream, TokenTree};
 use quote::quote;
-
-mod files;
-mod song;
 
 /// Return a slice of `Song`s that are in a specified directory.
 /// The songs are embedded into the program.
@@ -23,6 +19,14 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
         _ => panic!("This macro only accepts a single, non-empty string argument"),
     }
     .into();
+    // Make the path relative to the manifest directory
+    let path = if path.is_absolute() {
+        path
+    } else {
+        [env!("CARGO_MANIFEST_DIR"), "..", path.to_str().unwrap()]
+            .iter()
+            .collect()
+    };
     let files = RecurseFilesIterator::new(&path).unwrap();
 
     let mut tokens = vec![];
@@ -34,7 +38,9 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
         }
         let abs = file.to_str().unwrap();
         let rel = file.strip_prefix(&path).unwrap().to_str().unwrap();
-        tokens.push(quote!(song::CompiledSong { path: #rel, contents: include_bytes!(#abs) }));
+        tokens.push(
+            quote!(audio_player::song::CompiledSong { path: #rel, data: include_bytes!(#abs) }),
+        );
     }
 
     quote! {
@@ -43,6 +49,7 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
     .into()
 }
 
+// Inspired from https://docs.rs/include_dir_macros/0.7.4/src/include_dir_macros/lib.rs.html#31
 fn unwrap_string_literal(lit: &proc_macro::Literal) -> String {
     let mut repr = lit.to_string();
     assert!(

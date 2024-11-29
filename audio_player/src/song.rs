@@ -1,3 +1,4 @@
+//! Structures representing songs.
 use std::{
     collections::HashMap,
     fs::File,
@@ -8,11 +9,12 @@ use std::{
 use ureq::Agent;
 use url::Url;
 
+/// The `Box` type that contains `Error`s.
 pub type EBox = Box<dyn std::error::Error + Send + Sync>;
 
 /// Return the "real name" of a song, that is to say
 /// the part after the song number, if there is one.
-fn get_real_name(path: &str) -> Option<&str> {
+pub fn get_real_name(path: &str) -> Option<&str> {
     let mut name = path;
 
     // Keep only the basename (everything after the last slash)
@@ -25,41 +27,78 @@ fn get_real_name(path: &str) -> Option<&str> {
     name.split_once('_').map(|x| x.1)
 }
 
+/// A song that has data and a path.
 pub trait Song<'name>: Sized {
+    /// Return the song data.
+    ///
+    /// # Errors
+    /// Fails if the song cannot be fetched.
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox>;
+    /// Return the song path.
     fn get_path(&self) -> &'name str;
 
+    /// Return the "real name" of the song, depending on the path.
+    /// (See [`get_real_name`])
     fn get_real_name(&self) -> Option<&'name str> {
         get_real_name(self.get_path())
     }
+    /// Download the song data so it will be available immediatly later.
+    ///
+    /// # Errors
+    /// Fails if the song cannot be preloaded (i.e. cannot be fetched).
     fn preload(&mut self) -> Result<(), EBox> {
         Ok(())
     }
 }
 
+/// A song whose name is the real name.
+pub struct TestSong<'name> {
+    /// The song name.
+    pub name: &'name str,
+}
+impl<'name> Song<'name> for TestSong<'name> {
+    fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
+        Ok(Cursor::new(""))
+    }
+    fn get_path(&self) -> &'name str {
+        self.name
+    }
+    fn get_real_name(&self) -> Option<&'name str> {
+        Some(self.name)
+    }
+}
+impl<'name> From<&'name str> for TestSong<'name> {
+    fn from(name: &'name str) -> Self {
+        Self { name }
+    }
+}
+
 #[derive(Clone)]
+/// A song compiled into the program.
 pub struct CompiledSong<'name: 'static> {
+    /// The path to the song before compiling it.
     pub path: &'name str,
-    pub contents: &'static [u8],
+    /// The song data.
+    pub data: &'static [u8],
 }
 impl<'name> CompiledSong<'name> {
+    /// Create a new, empty [`CompiledSong`].
     pub fn new(path: &'name str) -> Self {
-        Self {
-            path,
-            contents: &[],
-        }
+        Self { path, data: &[] }
     }
 }
 impl<'name> Song<'name> for CompiledSong<'name> {
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
-        Ok(Cursor::new(self.contents))
+        Ok(Cursor::new(self.data))
     }
     fn get_path(&self) -> &'name str {
         self.path
     }
 }
 
+/// A song available in some file.
 pub struct FileSong<'name> {
+    /// The path to the file containing the song.
     pub path: &'name Path,
 }
 impl<'name> Song<'name> for FileSong<'name> {
@@ -71,13 +110,18 @@ impl<'name> Song<'name> for FileSong<'name> {
     }
 }
 
+/// A song available on the web.
 pub struct WebSong<'name, 'agent> {
-    pub url: &'name Url,
-    pub agent: &'agent Agent,
-    pub data: Vec<u8>,
+    /// The URL of the song.
+    url: &'name Url,
+    /// The [`Agent`] that will be used to fetch the song.
+    agent: &'agent Agent,
+    /// The fetched song data.
+    data: Vec<u8>,
     preloading: Mutex<()>,
 }
 impl<'name, 'agent> WebSong<'name, 'agent> {
+    /// Create a new [`WebSong`].
     pub fn new(url: &'name Url, agent: &'agent Agent) -> Self {
         Self {
             url,
@@ -133,6 +177,7 @@ pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
         return;
     }
     let length = files.len();
+    let mut last_swaps = vec![];
 
     'outer: loop {
         // Save the last positions of the double songs
@@ -152,14 +197,18 @@ pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
                         if i - position < min_threshold {
                             for j in 0..length {
                                 // If there is a song far enough and not another double song...
-                                if j.abs_diff(i) >= min_threshold
+                                if j.abs_diff(*position) >= min_threshold
                                     && files[j].get_real_name().unwrap_or_default() != real_name
                                 {
-                                    // Swap the songs...
+                                    // Swap the songs
                                     files.swap(i, j);
-                                    // ...and move the last file to the start
-                                    // (to avoid the cases where the first song is after the threshold)
-                                    files.rotate_left(1);
+                                    if last_swaps.contains(&(i, j)) {
+                                        last_swaps.clear();
+                                        // Move the last file to the start
+                                        // (to avoid the cases where the first song is after the threshold)
+                                        files.rotate_left(1);
+                                    }
+                                    last_swaps.push((i, j));
                                     continue 'outer;
                                 }
                             }
@@ -176,7 +225,14 @@ pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_double_songs, CompiledSong, Song};
+    use super::{check_double_songs, CompiledSong, Song, TestSong};
+
+    fn check<const N: usize>(a: &mut [&str; N], b: &[&str; N]) {
+        let mut songs = a.map(TestSong::from);
+        check_double_songs(&mut songs[..]);
+        let paths: Vec<_> = songs.iter().map(|x| x.name).collect();
+        assert_eq!(&paths, b);
+    }
 
     #[test]
     fn real_name() {
@@ -203,10 +259,41 @@ mod tests {
     }
 
     #[test]
+    fn no_double_songs() {
+        let a = &mut ["a", "b", "c", "d", "e"];
+        let b = &["a", "b", "c", "d", "e"];
+        // The songs should not move (there are no double songs)
+        check(a, b);
+    }
+
+    #[test]
     fn double_songs() {
-        let songs = &mut ["a", "b", "a", "c", "d", "e", "f"].map(CompiledSong::new);
-        check_double_songs(&mut songs[..]);
-        let paths: Vec<_> = songs.iter().map(|x| x.path).collect();
-        assert_eq!(&paths, &["a", "b", "c", "a", "d", "e", "f"]);
+        let a = &mut ["a", "b", "a", "c", "d", "e", "f", "g"];
+        let b = &["a", "b", "c", "a", "d", "e", "f", "g"];
+        // The double songs (the two "a") should be at a distance of 3
+        // (length / number of doubles * minimum threshold i.e. 8 / 2 * 0.75)
+        // i.e. we allow 4 ± 25% = 4 ± 1 = 3/4/5
+        check(a, b);
+    }
+
+    #[test]
+    fn songs_already_far() {
+        let a = &mut ["a", "b", "c", "d", "e", "a", "f", "g"];
+        let b = &["a", "b", "c", "d", "e", "a", "f", "g"];
+        // The songs should not move
+        check(a, b);
+    }
+
+    #[test]
+    fn songs_at_end() {
+        let a = &mut ["a", "b", "c", "d", "e", "f", "g", "g"];
+        let b = &["g", "b", "c", "d", "e", "f", "g", "a"];
+        // The double song ("g") should be inverted with a previous song ("a")
+        check(a, b);
+
+        let a = &mut ["a", "b", "c", "d", "e", "d", "f", "g"];
+        let b = &["d", "b", "c", "d", "e", "a", "f", "g"];
+        // The double song ("d") should be inverted with a previous song ("a")
+        check(a, b);
     }
 }
