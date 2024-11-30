@@ -1,4 +1,4 @@
-//! Code for the `include_songs!` macro.
+//! Code for the [`include_songs!`] macro.
 use files::RecurseFilesIterator;
 use std::path::PathBuf;
 
@@ -42,10 +42,9 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
         let abs = file.to_str().unwrap();
         let rel = file.strip_prefix(&path).unwrap().to_str().unwrap();
         #[cfg(any(clippy, test, doctest, feature = "test"))]
-        tokens.push(quote!(audio_player::song::Compiled::new(#rel)));
+        tokens.push(quote!(audio_player::song::Compiled::empty(#rel)));
         #[cfg(all(not(clippy), not(test), not(doctest), not(feature = "test")))]
-        tokens
-            .push(quote!(audio_player::song::Compiled { path: #rel, data: include_bytes!(#abs) }));
+        tokens.push(quote!(audio_player::song::Compiled::new(#rel, include_bytes!(#abs))));
     }
 
     quote! {

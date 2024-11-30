@@ -8,7 +8,7 @@ use std::{
 use ureq::Agent;
 use url::Url;
 
-/// The `Box` type that contains `Error`s.
+/// The [`Box`] type that contains `[Error`]s.
 pub type EBox = Box<dyn std::error::Error + Send + Sync>;
 
 /// Returns the "real name" of a song, that is to say
@@ -36,7 +36,7 @@ pub fn get_real_name(path: &str) -> Option<&str> {
     name.split_once('_').map(|x| x.1)
 }
 
-/// A song that has data and a path.
+/// A song that has data and a path (file path, URL, ...).
 pub trait Song<'name>: Sized {
     /// Returns the song data.
     ///
@@ -67,12 +67,12 @@ pub trait Song<'name>: Sized {
 /// # Examples
 /// ```
 /// # use audio_player::song::{Song, TestCase};
-/// let song = TestCase { name: "test" };
+/// let song = TestCase::new("test");
 /// assert_eq!(song.get_real_name(), Some("test"));
 /// ```
 pub struct TestCase<'name> {
     /// The song name.
-    pub name: &'name str,
+    name: &'name str,
 }
 impl<'name> Song<'name> for TestCase<'name> {
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
@@ -85,8 +85,10 @@ impl<'name> Song<'name> for TestCase<'name> {
         Some(self.name)
     }
 }
-impl<'name> From<&'name str> for TestCase<'name> {
-    fn from(name: &'name str) -> Self {
+impl<'name> TestCase<'name> {
+    /// Creates a new [`TestCase`].
+    #[must_use]
+    pub fn new(name: &'name str) -> Self {
         Self { name }
     }
 }
@@ -94,15 +96,20 @@ impl<'name> From<&'name str> for TestCase<'name> {
 #[derive(Clone)]
 /// A song compiled into the program.
 pub struct Compiled<'name: 'static> {
-    /// The path to the song before compiling it.
-    pub path: &'name str,
+    /// The path to the song before compiling it, relative to the base songs folder.
+    path: &'name str,
     /// The song data.
-    pub data: &'static [u8],
+    data: &'static [u8],
 }
 impl<'name> Compiled<'name> {
+    /// Creates a new [`Compiled`] song.
+    #[must_use]
+    pub const fn new(path: &'name str, data: &'static [u8]) -> Self {
+        Self { path, data }
+    }
     /// Creates a new, empty [`Compiled`] song.
     #[must_use]
-    pub const fn new(path: &'name str) -> Self {
+    pub const fn empty(path: &'name str) -> Self {
         Self { path, data: &[] }
     }
 }
@@ -118,7 +125,14 @@ impl<'name> Song<'name> for Compiled<'name> {
 /// A song available in some file.
 pub struct File<'name> {
     /// The path to the file containing the song.
-    pub path: &'name Path,
+    path: &'name Path,
+}
+impl<'name> File<'name> {
+    /// Creates a new [`File`] song.
+    #[must_use]
+    pub const fn new(path: &'name Path) -> Self {
+        Self { path }
+    }
 }
 impl<'name> Song<'name> for File<'name> {
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
@@ -175,13 +189,13 @@ impl<'name, 'agent> Song<'name> for Web<'name, 'agent> {
 }
 
 /// Searches for double songs.
-/// Returns a `HashMap` with the real song name as a key and the count as a value.
+/// Returns a [`HashMap`] with the real song name as a key and the count as a value.
 ///
 /// # Examples
 /// ```
 /// # use std::collections::HashMap;
 /// # use audio_player::song::{TestCase, get_double_songs};
-/// let queue = &mut ["a", "a", "b", "c"].map(TestCase::from);
+/// let queue = &mut ["a", "a", "b", "c"].map(TestCase::new);
 /// let double_songs = get_double_songs(&mut queue[..]);
 /// assert_eq!(double_songs, HashMap::from([("a", 2)]));
 /// ```
@@ -202,10 +216,10 @@ pub fn get_double_songs<'name>(files: &mut [impl Song<'name>]) -> HashMap<&'name
 ///
 /// # Examples
 /// ```
-/// use audio_player::song::{TestCase, check_double_songs};
-/// let mut queue = (&mut ["a", "a", "b", "c", "d", "e"]).map(TestCase::from);
+/// use audio_player::song::{Song, TestCase, check_double_songs};
+/// let mut queue = (&mut ["a", "a", "b", "c", "d", "e"]).map(TestCase::new);
 /// check_double_songs(&mut queue[..]);
-/// let queue = queue.map(|song| song.name);
+/// let queue = queue.map(|song| song.get_path());
 /// assert_eq!(&queue, &["a", "b", "a", "c", "d", "e"]);
 /// ```
 pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
@@ -263,12 +277,16 @@ pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
 
 #[cfg(test)]
 mod tests {
+    use crate::song::Song;
+
     use super::{check_double_songs, get_real_name, TestCase};
 
+    /// Checks if the `a` list, after being passed to [`check_double_songs`],
+    /// is equal to the `b` list.
     fn check<const N: usize>(a: &mut [&str; N], b: &[&str; N]) {
-        let mut songs = a.map(TestCase::from);
+        let mut songs = a.map(TestCase::new);
         check_double_songs(&mut songs[..]);
-        let paths: Vec<_> = songs.iter().map(|x| x.name).collect();
+        let paths: Vec<_> = songs.iter().map(Song::get_path).collect();
         assert_eq!(&paths, b);
     }
 

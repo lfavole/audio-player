@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 files = { path = "../files" }
-proc-macro2 = "1.0.89"
 quote = "1.0.37"
 
 [lib]

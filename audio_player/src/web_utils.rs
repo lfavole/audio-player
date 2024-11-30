@@ -11,18 +11,21 @@ struct LinksIterator<'a> {
 }
 
 impl<'a> LinksIterator<'a> {
-    pub fn new(content: &'a str) -> Self {
+    /// Creates a new [`LinksIterator`] on the given HTML `content`.
+    #[must_use]
+    fn new(content: &'a str) -> Self {
         Self { content }
     }
+    /// Remove `bytes` bytes at the start of the content and return them.
     fn eat(&mut self, bytes: usize) -> &'a str {
         let (ret, new_content) = &self.content.split_at(bytes);
         self.content = new_content;
         ret
     }
-    /// Checks if the asked position is preceded by a comment start.
+    /// Checks if the asked position is in a comment.
     /// If this is the case, remove the current comment
     /// (or the whole document if the comment doesn't end).
-    #[must_use = "this edits the buffer by removing comments; your code must act differently according to the return value (or wait until false is returned)"]
+    #[must_use = "the content may be edited and indexes will be invalid; you must run .find() again to get a new index if true is returned"]
     fn in_comment(&mut self, position: usize) -> bool {
         // If there is a comment before the current position...
         if let Some(start) = self.content[..position].find("<!--") {

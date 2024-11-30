@@ -18,9 +18,7 @@ macro_rules! files {
             let mut songs = files
                 .iter()
                 .filter(|file| file.extension().is_some_and(|ext| ext == "mp3"))
-                .map(|file| File {
-                    path: file.as_path(),
-                })
+                .map(|file| File::new(file))
                 .collect::<Vec<_>>();
 
             play_songs(&mut songs[..])
