@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use proc_macro::{TokenStream, TokenTree};
 use quote::quote;
 
-/// Return a slice of `Song`s that are in a specified directory.
-/// The songs are embedded into the program.
+/// Returns a slice of [`CompiledSong`](../audio_player/song/struct.CompiledSong.html)s
+/// that are in a specified directory.
 ///
 /// # Panics
 /// Panics if the input is not a string or if a file has a non-UTF-8 name.
@@ -23,6 +23,7 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
     let path = if path.is_absolute() {
         path
     } else {
+        // Go one level up because we are in the macros directory
         [env!("CARGO_MANIFEST_DIR"), "..", path.to_str().unwrap()]
             .iter()
             .collect()
@@ -36,11 +37,15 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
         if file.extension().unwrap_or_default() != "mp3" {
             continue;
         }
+        // We still check if the path is UTF-8
+        #[allow(unused_variables)]
         let abs = file.to_str().unwrap();
         let rel = file.strip_prefix(&path).unwrap().to_str().unwrap();
-        tokens.push(
-            quote!(audio_player::song::CompiledSong { path: #rel, data: include_bytes!(#abs) }),
-        );
+        #[cfg(any(clippy, test, doctest, feature = "test"))]
+        tokens.push(quote!(audio_player::song::Compiled::new(#rel)));
+        #[cfg(all(not(clippy), not(test), not(doctest), not(feature = "test")))]
+        tokens
+            .push(quote!(audio_player::song::Compiled { path: #rel, data: include_bytes!(#abs) }));
     }
 
     quote! {
@@ -49,7 +54,9 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
     .into()
 }
 
-// Inspired from https://docs.rs/include_dir_macros/0.7.4/src/include_dir_macros/lib.rs.html#31
+/// Gets a [`String`] from a [`proc_macro::Literal`].
+///
+/// Inspired from <https://docs.rs/include_dir_macros/0.7.4/src/include_dir_macros/lib.rs.html#31>.
 fn unwrap_string_literal(lit: &proc_macro::Literal) -> String {
     let mut repr = lit.to_string();
     assert!(

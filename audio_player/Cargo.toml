@@ -11,3 +11,6 @@ rodio = { version = "0.20.1", features = ["minimp3"] }
 tinyrand = "0.5.0"
 ureq = "2.10.1"
 url = "2.5.3"
+
+[lints]
+workspace = true

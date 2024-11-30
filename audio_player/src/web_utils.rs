@@ -19,7 +19,7 @@ impl<'a> LinksIterator<'a> {
         self.content = new_content;
         ret
     }
-    /// Check if the asked position is preceded by a comment start.
+    /// Checks if the asked position is preceded by a comment start.
     /// If this is the case, remove the current comment
     /// (or the whole document if the comment doesn't end).
     #[must_use = "this edits the buffer by removing comments; your code must act differently according to the return value (or wait until false is returned)"]
@@ -108,7 +108,7 @@ fn get_files_and_folders(agent: &Agent, url: &Url) -> Result<(Vec<Url>, Vec<Url>
     Ok((files, folders))
 }
 
-/// Recursively ping the given `url` and its subdirectories and returns the list of the available files.
+/// Recursively pings the given `url` and its subdirectories and returns the list of the available files.
 ///
 /// # Errors
 /// Fails:

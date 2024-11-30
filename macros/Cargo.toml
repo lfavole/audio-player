@@ -11,15 +11,10 @@ quote = "1.0.37"
 [lib]
 proc-macro = true
 
-[lints.clippy]
-all = "warn"
-pedantic = "warn"
+[features]
+# The reason we do this is because doctests don't get cfg(test)
+# See: https://github.com/rust-lang/cargo/issues/4669
+test = []
 
-[lints.rust]
-missing_docs = "warn"
-
-[lints.rustdoc]
-broken_intra_doc_links = "warn"
-missing_crate_level_docs = "warn"
-private_doc_tests = "warn"
-unescaped_backticks = "warn"
+[lints]
+workspace = true

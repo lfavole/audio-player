@@ -22,8 +22,6 @@ pedantic = "warn"
 missing_docs = "warn"
 
 [workspace.lints.rustdoc]
-missing_docs = "warn"
 missing_crate_level_docs = "warn"
-missing_doc_code_examples = "warn"
 private_doc_tests = "warn"
 unescaped_backticks = "warn"

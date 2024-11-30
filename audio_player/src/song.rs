@@ -1,7 +1,6 @@
 //! Structures representing songs.
 use std::{
     collections::HashMap,
-    fs::File,
     io::{Cursor, Read, Seek},
     path::Path,
     sync::Mutex,
@@ -12,8 +11,18 @@ use url::Url;
 /// The `Box` type that contains `Error`s.
 pub type EBox = Box<dyn std::error::Error + Send + Sync>;
 
-/// Return the "real name" of a song, that is to say
+/// Returns the "real name" of a song, that is to say
 /// the part after the song number, if there is one.
+///
+/// # Examples
+/// ```
+/// # use audio_player::song::get_real_name;
+/// assert_eq!(get_real_name("test/00_a.mp3"), Some("a"));
+/// assert_eq!(get_real_name("00_test.mp3"), Some("test"));
+/// assert_eq!(get_real_name("test/00.mp3"), None);
+/// assert_eq!(get_real_name("test.mp3"), None);
+/// ```
+#[must_use]
 pub fn get_real_name(path: &str) -> Option<&str> {
     let mut name = path;
 
@@ -29,20 +38,22 @@ pub fn get_real_name(path: &str) -> Option<&str> {
 
 /// A song that has data and a path.
 pub trait Song<'name>: Sized {
-    /// Return the song data.
+    /// Returns the song data.
     ///
     /// # Errors
     /// Fails if the song cannot be fetched.
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox>;
-    /// Return the song path.
+    /// Returns the song path.
+    #[must_use]
     fn get_path(&self) -> &'name str;
 
-    /// Return the "real name" of the song, depending on the path.
+    /// Returns the "real name" of the song, depending on the path.
     /// (See [`get_real_name`])
+    #[must_use]
     fn get_real_name(&self) -> Option<&'name str> {
         get_real_name(self.get_path())
     }
-    /// Download the song data so it will be available immediatly later.
+    /// Downloads the song data so it will be available immediatly later.
     ///
     /// # Errors
     /// Fails if the song cannot be preloaded (i.e. cannot be fetched).
@@ -51,12 +62,19 @@ pub trait Song<'name>: Sized {
     }
 }
 
-/// A song whose name is the real name.
-pub struct TestSong<'name> {
+/// A song whose name is the real name, for testing purposes.
+///
+/// # Examples
+/// ```
+/// # use audio_player::song::{Song, TestCase};
+/// let song = TestCase { name: "test" };
+/// assert_eq!(song.get_real_name(), Some("test"));
+/// ```
+pub struct TestCase<'name> {
     /// The song name.
     pub name: &'name str,
 }
-impl<'name> Song<'name> for TestSong<'name> {
+impl<'name> Song<'name> for TestCase<'name> {
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
         Ok(Cursor::new(""))
     }
@@ -67,7 +85,7 @@ impl<'name> Song<'name> for TestSong<'name> {
         Some(self.name)
     }
 }
-impl<'name> From<&'name str> for TestSong<'name> {
+impl<'name> From<&'name str> for TestCase<'name> {
     fn from(name: &'name str) -> Self {
         Self { name }
     }
@@ -75,19 +93,20 @@ impl<'name> From<&'name str> for TestSong<'name> {
 
 #[derive(Clone)]
 /// A song compiled into the program.
-pub struct CompiledSong<'name: 'static> {
+pub struct Compiled<'name: 'static> {
     /// The path to the song before compiling it.
     pub path: &'name str,
     /// The song data.
     pub data: &'static [u8],
 }
-impl<'name> CompiledSong<'name> {
-    /// Create a new, empty [`CompiledSong`].
-    pub fn new(path: &'name str) -> Self {
+impl<'name> Compiled<'name> {
+    /// Creates a new, empty [`Compiled`] song.
+    #[must_use]
+    pub const fn new(path: &'name str) -> Self {
         Self { path, data: &[] }
     }
 }
-impl<'name> Song<'name> for CompiledSong<'name> {
+impl<'name> Song<'name> for Compiled<'name> {
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
         Ok(Cursor::new(self.data))
     }
@@ -97,13 +116,13 @@ impl<'name> Song<'name> for CompiledSong<'name> {
 }
 
 /// A song available in some file.
-pub struct FileSong<'name> {
+pub struct File<'name> {
     /// The path to the file containing the song.
     pub path: &'name Path,
 }
-impl<'name> Song<'name> for FileSong<'name> {
+impl<'name> Song<'name> for File<'name> {
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
-        Ok(File::open(self.path)?)
+        Ok(std::fs::File::open(self.path)?)
     }
     fn get_path(&self) -> &'name str {
         self.path.to_str().unwrap() // FIXME
@@ -111,7 +130,7 @@ impl<'name> Song<'name> for FileSong<'name> {
 }
 
 /// A song available on the web.
-pub struct WebSong<'name, 'agent> {
+pub struct Web<'name, 'agent> {
     /// The URL of the song.
     url: &'name Url,
     /// The [`Agent`] that will be used to fetch the song.
@@ -120,9 +139,10 @@ pub struct WebSong<'name, 'agent> {
     data: Vec<u8>,
     preloading: Mutex<()>,
 }
-impl<'name, 'agent> WebSong<'name, 'agent> {
-    /// Create a new [`WebSong`].
-    pub fn new(url: &'name Url, agent: &'agent Agent) -> Self {
+impl<'name, 'agent> Web<'name, 'agent> {
+    /// Creates a new [`Web`] song.
+    #[must_use]
+    pub const fn new(url: &'name Url, agent: &'agent Agent) -> Self {
         Self {
             url,
             agent,
@@ -131,7 +151,7 @@ impl<'name, 'agent> WebSong<'name, 'agent> {
         }
     }
 }
-impl<'name, 'agent> Song<'name> for WebSong<'name, 'agent> {
+impl<'name, 'agent> Song<'name> for Web<'name, 'agent> {
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
         self.preload()?;
         Ok(Cursor::new(self.data.clone()))
@@ -154,9 +174,18 @@ impl<'name, 'agent> Song<'name> for WebSong<'name, 'agent> {
     }
 }
 
-/// Search for double songs.
-/// Return a `HashMap` with the real song name as a key and the count as a value.
-fn get_double_songs<'name>(files: &mut [impl Song<'name>]) -> HashMap<&'name str, usize> {
+/// Searches for double songs.
+/// Returns a `HashMap` with the real song name as a key and the count as a value.
+///
+/// # Examples
+/// ```
+/// # use std::collections::HashMap;
+/// # use audio_player::song::{TestCase, get_double_songs};
+/// let queue = &mut ["a", "a", "b", "c"].map(TestCase::from);
+/// let double_songs = get_double_songs(&mut queue[..]);
+/// assert_eq!(double_songs, HashMap::from([("a", 2)]));
+/// ```
+pub fn get_double_songs<'name>(files: &mut [impl Song<'name>]) -> HashMap<&'name str, usize> {
     let mut filenames: HashMap<&str, usize> = HashMap::with_capacity(files.len() / 2);
     for song in files {
         if let Some(real_name) = song.get_real_name() {
@@ -169,7 +198,16 @@ fn get_double_songs<'name>(files: &mut [impl Song<'name>]) -> HashMap<&'name str
         .collect::<HashMap<_, _>>()
 }
 
-/// Change the queue order to put double songs far from each other.
+/// Changes the queue order to put double songs far from each other.
+///
+/// # Examples
+/// ```
+/// use audio_player::song::{TestCase, check_double_songs};
+/// let mut queue = (&mut ["a", "a", "b", "c", "d", "e"]).map(TestCase::from);
+/// check_double_songs(&mut queue[..]);
+/// let queue = queue.map(|song| song.name);
+/// assert_eq!(&queue, &["a", "b", "a", "c", "d", "e"]);
+/// ```
 pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
     let double_songs = get_double_songs(files);
     // If there are no double songs, stop here
@@ -225,10 +263,10 @@ pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_double_songs, CompiledSong, Song, TestSong};
+    use super::{check_double_songs, get_real_name, TestCase};
 
     fn check<const N: usize>(a: &mut [&str; N], b: &[&str; N]) {
-        let mut songs = a.map(TestSong::from);
+        let mut songs = a.map(TestCase::from);
         check_double_songs(&mut songs[..]);
         let paths: Vec<_> = songs.iter().map(|x| x.name).collect();
         assert_eq!(&paths, b);
@@ -236,26 +274,15 @@ mod tests {
 
     #[test]
     fn real_name() {
-        assert_eq!(
-            CompiledSong::new("test/00_a.mp3").get_real_name(),
-            Some("a")
-        );
-        assert_eq!(
-            CompiledSong::new("test/a/b/00_c.mp3").get_real_name(),
-            Some("c")
-        );
-        assert_eq!(
-            CompiledSong::new("test/00_a.test.mp3").get_real_name(),
-            Some("a.test")
-        );
-        assert_eq!(
-            CompiledSong::new("test/00_a_test.mp3").get_real_name(),
-            Some("a_test")
-        );
+        assert_eq!(get_real_name("test/00_a.mp3"), Some("a"));
+        assert_eq!(get_real_name("test/a/b/00_c.mp3"), Some("c"));
+        assert_eq!(get_real_name("test/00_a.test.mp3"), Some("a.test"));
+        assert_eq!(get_real_name("test/00_a_test.mp3"), Some("a_test"));
+        assert_eq!(get_real_name("00_test.mp3"), Some("test"));
 
-        assert_eq!(CompiledSong::new("test/00.mp3").get_real_name(), None);
-        assert_eq!(CompiledSong::new("test/test.mp3").get_real_name(), None);
-        assert_eq!(CompiledSong::new("test.mp3").get_real_name(), None);
+        assert_eq!(get_real_name("test/00.mp3"), None);
+        assert_eq!(get_real_name("test/test.mp3"), None);
+        assert_eq!(get_real_name("test.mp3"), None);
     }
 
     #[test]

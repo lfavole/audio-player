@@ -1,0 +1,11 @@
+{
+	"rust-analyzer.runnables.extraTestBinaryArgs": [
+		"--show-output",
+		"--features",
+		"test"
+	],
+	"rust-analyzer.check.extraArgs": [
+		"--features",
+		"test"
+	]
+}

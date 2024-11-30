@@ -6,7 +6,7 @@ use tinyrand::{Rand, Seeded, StdRand};
 
 use crate::song::{check_double_songs, EBox, Song};
 
-/// Play the given songs list.
+/// Plays the given list of [`Song`]s.
 ///
 /// # Errors
 /// Fails:

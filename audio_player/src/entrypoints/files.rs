@@ -1,6 +1,6 @@
 //! Macro that generates an entry point for a player using the local file system.
 
-/// Play the songs in a specified folder.
+/// Plays the songs in a specified folder.
 #[macro_export]
 macro_rules! files {
     ($folder:tt) => {
@@ -8,7 +8,7 @@ macro_rules! files {
 
         use files::RecurseFilesIterator;
         use $crate::player::play_songs;
-        use $crate::song::{EBox, FileSong};
+        use $crate::song::{EBox, File};
 
         const FOLDER: &str = $folder;
 
@@ -18,7 +18,7 @@ macro_rules! files {
             let mut songs = files
                 .iter()
                 .filter(|file| file.extension().is_some_and(|ext| ext == "mp3"))
-                .map(|file| FileSong {
+                .map(|file| File {
                     path: file.as_path(),
                 })
                 .collect::<Vec<_>>();
