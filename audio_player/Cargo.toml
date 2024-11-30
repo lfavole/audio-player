@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 files = { path = "../files" }
 macros = { path = "../macros" }
-rayon = "1.10.0"
 rodio = { version = "0.20.1", features = ["minimp3"] }
 tinyrand = "0.5.0"
 ureq = "2.10.1"

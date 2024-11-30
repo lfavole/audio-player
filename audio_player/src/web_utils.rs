@@ -1,5 +1,6 @@
 //! Utility functions to work with webpages.
-use rayon::prelude::*;
+use std::thread;
+
 use ureq::Agent;
 use url::Url;
 
@@ -118,15 +119,28 @@ fn get_files_and_folders(agent: &Agent, url: &Url) -> Result<(Vec<Url>, Vec<Url>
 /// * if an URL cannot be fetched
 /// * if a response cannot be decoded
 /// * if a link cannot be resolved
+///
+/// # Panics
+/// Panics if a thread that gets the folders on a webpage panics.
 pub fn get_files(agent: &Agent, url: &Url) -> Result<Vec<Url>, EBox> {
     let mut files: Vec<Url> = vec![];
     let mut folders: Vec<Url> = vec![url.clone()];
 
     while !folders.is_empty() {
-        let results = folders
-            .par_iter()
-            .map(|url| get_files_and_folders(agent, url))
-            .collect::<Vec<_>>();
+        let mut results = vec![];
+        thread::scope(|s| {
+            let mut threads = vec![];
+            while !folders.is_empty() {
+                let url = folders.remove(0);
+                threads.push(s.spawn(move || get_files_and_folders(agent, &url)));
+            }
+            // for url in &folders {
+            //     threads.push(s.spawn(|| get_files_and_folders(agent, url)));
+            // }
+            for thread in threads {
+                results.push(thread.join().unwrap());
+            }
+        });
         folders.clear();
 
         for result in results {
