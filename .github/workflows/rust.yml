@@ -1,0 +1,85 @@
+name: Cargo Build & Test
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, beta, nightly]
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+
+      - name: Install libasound2-dev
+        run: sudo apt install -y libasound2-dev
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+
+      - name: Create directories
+        run: |
+          mkdir christmas
+          mkdir splitted
+
+      - name: Cache Cargo files
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-${{ matrix.toolchain }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: cargo-${{ matrix.toolchain }}-${{ runner.os }}-
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Run tests
+        run: cargo test --verbose --features test
+
+      - name: Build the docs
+        run: cargo doc
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.toolchain == 'stable' }}
+
+      - name: Add redirect page
+        run: echo "<meta http-equiv=refresh content=0;url=audio_player>" > target/doc/index.html
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.toolchain == 'stable' }}
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc/
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.toolchain == 'stable' }}
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
