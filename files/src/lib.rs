@@ -69,7 +69,10 @@ impl RecurseFilesIterator {
 
 #[cfg(test)]
 mod tests {
-    use std::{env::current_dir, path::{PathBuf, MAIN_SEPARATOR_STR}};
+    use std::{
+        env::current_dir,
+        path::{PathBuf, MAIN_SEPARATOR_STR},
+    };
 
     use crate::RecurseFilesIterator;
 
@@ -99,6 +102,12 @@ mod tests {
         // Make higher-level items appear first
         files.sort_by_key(|file| usize::MAX - file.matches(MAIN_SEPARATOR_STR).count());
 
-        assert_eq!(files, vec!["src".to_owned() + MAIN_SEPARATOR_STR + "lib.rs", "Cargo.toml".to_owned()]);
+        assert_eq!(
+            files,
+            vec![
+                "src".to_owned() + MAIN_SEPARATOR_STR + "lib.rs",
+                "Cargo.toml".to_owned()
+            ]
+        );
     }
 }

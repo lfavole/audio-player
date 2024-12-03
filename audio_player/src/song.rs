@@ -37,7 +37,7 @@ pub fn get_real_name(path: &str) -> Option<&str> {
 }
 
 /// A song that has data and a path (file path, URL, ...).
-pub trait Song<'name>: Sized {
+pub trait Song<'name>: Sized + Send + Sync {
     /// Returns the song data.
     ///
     /// # Errors
