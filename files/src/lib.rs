@@ -1,11 +1,13 @@
 //! Functions on files.
 //! They need to be here because they are used by both the macros and the main program.
 use std::{
+    error,
     fs::{read_dir, ReadDir},
+    io,
     path::{Path, PathBuf},
 };
 
-type EBox = Box<dyn std::error::Error + Send + Sync>;
+type EBox = Box<dyn error::Error + Send + Sync>;
 
 /// A recursive iterator over all the files in a directory.
 ///
@@ -27,13 +29,16 @@ impl RecurseFilesIterator {
     ///
     /// # Errors
     /// Fails if the `path` cannot be found.
-    pub fn new(path: &Path) -> std::io::Result<Self> {
+    pub fn new(path: &Path) -> io::Result<Self> {
         Ok(Self {
             stack: vec![read_dir(path)?],
         })
     }
     /// Private method that returns the next item as a [`Result`].
     /// This is needed to use the `?` operator properly.
+    ///
+    /// # Errors
+    /// Fails if an entry or its metadata cannot be determined.
     fn next_item(&mut self) -> Result<Option<PathBuf>, EBox> {
         loop {
             // Get the current element on the stack
@@ -68,6 +73,7 @@ impl RecurseFilesIterator {
 }
 
 #[cfg(test)]
+#[expect(clippy::missing_panics_doc)]
 mod tests {
     use std::{
         env::current_dir,
@@ -76,14 +82,19 @@ mod tests {
 
     use crate::RecurseFilesIterator;
 
-    #[test]
     /// Tests the file list in this module's directory.
     ///
     /// This assumes that the directory hasn't been "polluted" by `.gitignore`d files.
+    #[test]
     fn this_directory() {
         /// Converts a [`PathBuf`] to a [`String`].
+        ///
+        /// # Panics
+        /// Panics if the path is not UTF-8.
         fn convert(file: PathBuf) -> String {
-            file.into_os_string().into_string().unwrap()
+            file.into_os_string()
+                .into_string()
+                .expect("path should be UTF-8")
         }
 
         let folder = current_dir().unwrap();

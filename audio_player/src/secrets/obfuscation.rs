@@ -1,7 +1,11 @@
 //! Simple obfuscation algorithm for secret data.
 
 /// Returns the smallest x for which the x-th triangular number is smaller than or equal to `max`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss)]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
 fn triangular_numbers_count(max: usize) -> usize {
     // (n^2 + n) / 2 = max
     // n^2 + n - 2 * max = 0
@@ -16,11 +20,13 @@ fn triangular_numbers_count(max: usize) -> usize {
 ///
 /// It includes the next triangular number if `max` is not a triangular number.
 fn triangular_numbers(max: usize) -> impl DoubleEndedIterator<Item = usize> + Sized {
-    (1..=triangular_numbers_count(max)).filter(move |&x| x < max).map(|x| (x * x + x) / 2)
+    (1..=triangular_numbers_count(max))
+        .filter(move |&x| x < max)
+        .map(|x| (x * x + x) / 2)
 }
 
 /// Obfuscates some `data`: returns a list of `(normal_pos, obfuscated_pos)`.
-fn two_way_obfuscate(length: usize) -> std::vec::Vec<(usize, usize)> {
+fn two_way_obfuscate(length: usize) -> Vec<(usize, usize)> {
     let mut ret = vec![];
     // The index of the clear data
     let mut index = 0;
@@ -75,15 +81,19 @@ pub fn deobfuscate<T: Clone + Default>(data: &[T]) -> Vec<T> {
 }
 
 #[cfg(test)]
+#[expect(clippy::missing_panics_doc)]
 mod tests {
-    use tinyrand::Seeded;
-
     use super::{deobfuscate, obfuscate, triangular_numbers};
 
     /// Checks that the triangular numbers are in the asked bounds.
     #[test]
     fn test_triangular_numbers() {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::float_cmp)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_precision_loss,
+            clippy::cast_sign_loss,
+            clippy::float_cmp
+        )]
         fn is_triangular_number(n: usize) -> bool {
             let result = (8.0 * n as f64 + 1.0).sqrt();
             result as usize as f64 == result

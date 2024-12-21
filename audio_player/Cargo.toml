@@ -10,10 +10,14 @@ files = { path = "../files" }
 # Disable IDNA
 idna_adapter = "=1.0.0"
 macros = { path = "../macros" }
-rodio = { version = "0.20.1", default-features = false, features = ["minimp3"] }
+rodio = { version = "0.20.1", default-features = false, features = ["symphonia-mp3"] }
+souvlaki = "0.7.3"
 tinyrand = "0.5.0"
 ureq = "2.10.1"
 url = "2.5.3"
+winctx = "0.0.19"
+windows-sys = { version = "0.59.0", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_UI_Shell"] }
+winit = { version = "0.30.5" }
 
 [lints]
 workspace = true

@@ -1,15 +1,16 @@
 //! Structures representing songs.
 use std::{
     collections::HashMap,
-    io::{Cursor, Read, Seek},
+    error::Error,
+    io::{BufReader, Cursor, Read, Seek},
     path::Path,
     sync::Mutex,
 };
 use ureq::Agent;
 use url::Url;
 
-/// The [`Box`] type that contains `[Error`]s.
-pub type EBox = Box<dyn std::error::Error + Send + Sync>;
+/// The [`Box`] type that contains [`Error`]s.
+pub type EBox = Box<dyn Error + Send + Sync>;
 
 /// Returns the "real name" of a song, that is to say
 /// the part after the song number, if there is one.
@@ -135,11 +136,13 @@ impl<'name> File<'name> {
     }
 }
 impl<'name> Song<'name> for File<'name> {
+    #[expect(clippy::absolute_paths, reason = "name conflict")]
     fn get_data(&mut self) -> Result<impl Read + Seek + Send + Sync + 'static, EBox> {
-        Ok(std::fs::File::open(self.path)?)
+        Ok(BufReader::new(std::fs::File::open(self.path)?))
     }
+    #[expect(clippy::unwrap_used, reason = "errors can't be propagated properly")]
     fn get_path(&self) -> &'name str {
-        self.path.to_str().unwrap() // FIXME
+        self.path.to_str().unwrap()
     }
 }
 
@@ -151,6 +154,7 @@ pub struct Web<'name, 'agent> {
     agent: &'agent Agent,
     /// The fetched song data.
     data: Vec<u8>,
+    /// A lock that allows launching only one [`Web::preload`] function at a time.
     preloading: Mutex<()>,
 }
 impl<'name, 'agent> Web<'name, 'agent> {
@@ -170,8 +174,9 @@ impl<'name, 'agent> Song<'name> for Web<'name, 'agent> {
         self.preload()?;
         Ok(Cursor::new(self.data.clone()))
     }
+    #[expect(clippy::unwrap_in_result, reason = "locks should almost always work")]
     fn preload(&mut self) -> Result<(), EBox> {
-        let _lock = self.preloading.lock().unwrap();
+        let _lock = self.preloading.lock().expect("error while acquiring lock");
         if !self.data.is_empty() {
             return Ok(());
         }
@@ -222,7 +227,7 @@ pub fn get_double_songs<'name>(files: &mut [impl Song<'name>]) -> HashMap<&'name
 /// let queue = queue.map(|song| song.get_path());
 /// assert_eq!(&queue, &["a", "b", "a", "c", "d", "e"]);
 /// ```
-pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
+pub fn check_double_songs<'name, S: Song<'name>>(files: &mut [S]) {
     let double_songs = get_double_songs(files);
     // If there are no double songs, stop here
     if double_songs.is_empty() {
@@ -276,6 +281,7 @@ pub fn check_double_songs<'name>(files: &mut [impl Song<'name>]) {
 }
 
 #[cfg(test)]
+#[expect(clippy::missing_panics_doc)]
 mod tests {
     use crate::song::Song;
 
@@ -283,11 +289,14 @@ mod tests {
 
     /// Checks if the `a` list, after being passed to [`check_double_songs`],
     /// is equal to the `b` list.
-    fn check<const N: usize>(a: &mut [&str; N], b: &[&str; N]) {
-        let mut songs = a.map(TestCase::new);
+    ///
+    /// # Panics
+    /// If `a != b`.
+    fn check<const N: usize>(left: &mut [&str; N], right: &[&str; N]) {
+        let mut songs = left.map(TestCase::new);
         check_double_songs(&mut songs[..]);
         let paths: Vec<_> = songs.iter().map(Song::get_path).collect();
-        assert_eq!(&paths, b);
+        assert_eq!(&paths, right);
     }
 
     #[test]

@@ -1,10 +1,10 @@
 //! The implementation of the secret commands.
-use std::{io::Cursor, sync::mpsc::SyncSender};
+use std::{io::Cursor, string::FromUtf8Error, sync::mpsc::SyncSender};
 
+use super::obfuscation::deobfuscate;
 use crate::{player::Command, song::EBox};
 use chrono::{Datelike, Local};
 use rodio::{Decoder, OutputStream, Sink};
-use super::obfuscation::deobfuscate;
 
 /// Checks if one or many [`Secret`]s can be triggered.
 ///
@@ -25,7 +25,6 @@ pub fn check_secrets_once(tx: &SyncSender<Command>) -> Result<(), EBox> {
 }
 
 /// A secret feature.
-#[allow(unused_variables)]
 pub trait Secret {
     /// Checks if the [`Secret`] can be triggered.
     ///
@@ -41,7 +40,11 @@ pub trait Secret {
     ///
     /// # Errors
     /// Depends on the implementation.
-    fn can_be_triggered(&mut self, tx: &SyncSender<Command>, stack: &mut String) -> Result<bool, EBox>;
+    fn can_be_triggered(
+        &mut self,
+        tx: &SyncSender<Command>,
+        stack: &mut String,
+    ) -> Result<bool, EBox>;
     /// Trigger the [`Secret`].
     ///
     /// # Errors
@@ -50,7 +53,6 @@ pub trait Secret {
 }
 
 /// A secret feature that triggers when the program starts.
-#[allow(unused_variables)]
 pub trait SecretOnce {
     /// Checks if the [`Secret`] can be triggered.
     ///
@@ -76,11 +78,18 @@ pub trait SecretOnce {
 
 struct Secret1;
 impl Secret for Secret1 {
-    fn can_be_triggered(&mut self, _tx: &SyncSender<Command>, stack: &mut String) -> Result<bool, EBox> {
+    fn can_be_triggered(
+        &mut self,
+        _tx: &SyncSender<Command>,
+        stack: &mut String,
+    ) -> Result<bool, EBox> {
         let chars: Vec<u8> = "tblkqmvawbicfizraysbwftntbpyaypnnjhxtflo".into();
         let pwd_chars = deobfuscate(&chars);
         let pwd = String::from_utf8(pwd_chars)?;
-        let mut real_pwd = pwd.chars().step_by((chars[2] - chars[1]) as usize / 2).collect::<String>();
+        let mut real_pwd = pwd
+            .chars()
+            .step_by((chars[2] - chars[1]) as usize / 2)
+            .collect::<String>();
         let now = Local::now().date_naive();
         let day = format!("{:02}{:02}", now.day(), now.month());
         real_pwd.push_str(&day);
@@ -101,44 +110,53 @@ impl Secret for Secret1 {
     }
 }
 
-#[allow(clippy::cast_possible_truncation)]
-fn d(n: u32) -> u32 {
+/// Performs some operation on a deobfuscated number.
+///
+/// # Errors
+/// Fails if one of the given characters is not a digit.
+#[expect(clippy::cast_possible_truncation, clippy::min_ident_chars)]
+fn d(n: u32) -> Result<u32, EBox> {
     let s = n.to_string();
-    let p: u32 = s.chars().map(|x| x.to_string().parse::<u32>().unwrap()).product();
-    p - s.len() as u32
+    let mut p = 1;
+    for c in s.chars() {
+        p *= c.to_string().parse::<u32>()?;
+    }
+    Ok(p - s.len() as u32)
 }
 
+/// Decodes obfuscated data.
+#[expect(clippy::min_ident_chars)]
 #[must_use]
 pub fn decode(a: usize, l: usize, r: bool) -> Vec<u8> {
     let s = include_bytes!("secrets.bin");
-    let mut s = s.iter()
-    .enumerate()
-    .skip(a)
-    .step_by((s[0] - s[1]) as usize)
-    .take(l)
-    .map(|(i, c)| {
-        if i % 2 == 0 {
-            255 - *c
-        } else {
-            *c
-        }
-    })
-    .collect::<Vec<_>>();
+    let mut s = s
+        .iter()
+        .enumerate()
+        .skip(a)
+        .step_by((s[0] - s[1]) as usize)
+        .take(l)
+        .map(|(i, c)| if i % 2 == 0 { 255 - *c } else { *c })
+        .collect::<Vec<_>>();
     if r {
         s.reverse();
     }
     s
 }
 
-#[allow(clippy::cast_possible_truncation)]
-#[must_use]
-pub fn decode_string(a: usize, l: usize, r: bool) -> String {
-    String::from_utf8(decode(a, l, r)).unwrap()
+/// Decodes an obfuscated string.
+///
+/// # Errors
+/// Fails if the decoded string is not valid UTF-8.
+#[expect(clippy::min_ident_chars)]
+pub fn decode_string(a: usize, l: usize, r: bool) -> Result<String, FromUtf8Error> {
+    String::from_utf8(decode(a, l, r))
 }
 
-#[allow(clippy::cast_possible_truncation)]
+/// Decodes an obfuscated number.
+#[expect(clippy::cast_possible_truncation, clippy::min_ident_chars)]
 #[must_use]
-pub fn decode_number(chars: &[u8]) -> u32 {
+pub fn decode_number(a: usize, l: usize, r: bool) -> u32 {
+    let chars = decode(a, l, r);
     let mut n: u32 = 0;
     for (i, c) in chars.iter().rev().enumerate() {
         n += u32::from(*c) * 256u32.pow(i as u32);
@@ -149,14 +167,14 @@ pub fn decode_number(chars: &[u8]) -> u32 {
 struct Secret2;
 impl SecretOnce for Secret2 {
     fn can_be_triggered(&mut self, _tx: &SyncSender<Command>) -> Result<bool, EBox> {
-        let n = d(decode_number(&decode(20, 3, false)));
+        let n = d(decode_number(20, 3, false))?;
         let now = Local::now().date_naive();
         let (a, b) = (now.day(), now.month());
         Ok((a.saturating_sub(b) * (a + b)).saturating_sub(a + b) == n)
     }
 
     fn trigger(&mut self, _tx: &SyncSender<Command>) -> Result<(), EBox> {
-        println!("{}", decode_string(23, 24, false));
+        println!("{}", decode_string(23, 24, false)?);
         Ok(())
     }
 }

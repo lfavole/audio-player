@@ -7,19 +7,20 @@ use url::Url;
 use crate::song::EBox;
 
 /// An iterator over the links in a webpage.
-struct LinksIterator<'a> {
-    content: &'a str,
+struct LinksIterator<'content> {
+    /// The webpage content that hasn't been parsed yet.
+    content: &'content str,
 }
 
-impl<'a> LinksIterator<'a> {
+impl<'content> LinksIterator<'content> {
     /// Creates a new [`LinksIterator`] on the given HTML `content`.
     #[must_use]
-    fn new(content: &'a str) -> Self {
+    fn new(content: &'content str) -> Self {
         Self { content }
     }
     /// Remove `bytes` bytes at the start of the content and return them.
-    fn eat(&mut self, bytes: usize) -> &'a str {
-        let (ret, new_content) = &self.content.split_at(bytes);
+    fn eat(&mut self, bytes: usize) -> &'content str {
+        let (ret, new_content) = self.content.split_at(bytes);
         self.content = new_content;
         ret
     }
@@ -49,9 +50,10 @@ impl<'a> LinksIterator<'a> {
     }
 }
 
-impl<'a> Iterator for LinksIterator<'a> {
-    type Item = &'a str;
+impl<'content> Iterator for LinksIterator<'content> {
+    type Item = &'content str;
 
+    #[expect(clippy::unwrap_used, clippy::unwrap_in_result)]
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // If we find the pattern...
@@ -60,12 +62,14 @@ impl<'a> Iterator for LinksIterator<'a> {
                 if self.in_comment(index) {
                     continue;
                 }
+
                 // Add (don't set) because the index is relative to the new substring
                 self.eat(index + 8); // length of the link start
-                                     // Find the end character and optionally advance the last index
+
+                // Find the end character and optionally advance the last index
                 let end_chars = match self.content.get(..1) {
-                    // Safety: self.eat(1) will never panic
-                    // because self.content.get(..1) contains a character
+                    // SAFETY: self.eat(1) will never panic
+                    // because self.content.get(..1) contains exactly one `char`
                     Some("\"" | "'") => vec![self.eat(1).chars().next().unwrap()],
                     Some(_) => vec!['>', ' '],
                     None => break,
@@ -85,6 +89,9 @@ impl<'a> Iterator for LinksIterator<'a> {
 }
 
 /// Returns the list of the files and folders available at the given `url`.
+///
+/// # Errors
+/// Fails if the URL list cannot be fetched properly.
 fn get_files_and_folders(agent: &Agent, url: &Url) -> Result<(Vec<Url>, Vec<Url>), EBox> {
     let mut files = vec![];
     let mut folders = vec![];
@@ -92,7 +99,7 @@ fn get_files_and_folders(agent: &Agent, url: &Url) -> Result<(Vec<Url>, Vec<Url>
     // Get the directory listing page
     let body = agent.request_url("GET", url).call()?.into_string()?;
 
-    for link in LinksIterator::new(&body[..]) {
+    for link in LinksIterator::new(&body) {
         // Get the target URL
         let target_url = url.join(link)?;
         // Save the URL to the files/folders list
@@ -138,6 +145,7 @@ pub fn get_files(agent: &Agent, url: &Url) -> Result<Vec<Url>, EBox> {
             //     threads.push(s.spawn(|| get_files_and_folders(agent, url)));
             // }
             for thread in threads {
+                #[expect(clippy::unwrap_used)]
                 results.push(thread.join().unwrap());
             }
         });
@@ -154,6 +162,7 @@ pub fn get_files(agent: &Agent, url: &Url) -> Result<Vec<Url>, EBox> {
 }
 
 #[cfg(test)]
+#[expect(clippy::missing_panics_doc)]
 mod tests {
     use super::LinksIterator;
 
@@ -191,7 +200,7 @@ mod tests {
 
     #[test]
     fn minified() {
-        let html = r"
+        let html = "
         <a href=/a/b/c>...</a>
         <a href=/d/e/f rel=noreferrer>...</a>
         ";

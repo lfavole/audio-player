@@ -1,6 +1,6 @@
 //! Code for the [`include_songs!`] macro.
 use files::RecurseFilesIterator;
-use std::path::PathBuf;
+use std::path::{PathBuf, MAIN_SEPARATOR};
 
 use proc_macro::{TokenStream, TokenTree};
 use quote::quote;
@@ -24,23 +24,29 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
         path
     } else {
         // Go one level up because we are in the macros directory
-        [env!("CARGO_MANIFEST_DIR"), "..", path.to_str().unwrap()]
-            .iter()
-            .collect()
+        [
+            env!("CARGO_MANIFEST_DIR"),
+            "..",
+            path.to_str().expect("non UTF-8 path"),
+        ]
+        .iter()
+        .collect()
     };
-    let files = RecurseFilesIterator::new(&path).unwrap();
+    let path_str = path.to_str().expect("non UTF-8 base path");
+    let files = RecurseFilesIterator::new(&path).expect("failed to get the file list");
 
     let mut tokens = vec![];
 
     for file in files {
-        let file = file.unwrap();
+        let file = file.expect("failed to get the file");
         if file.extension().unwrap_or_default() != "mp3" {
             continue;
         }
-        // We still check if the path is UTF-8
-        #[allow(unused_variables)]
-        let abs = file.to_str().unwrap();
-        let rel = file.strip_prefix(&path).unwrap().to_str().unwrap();
+        let abs = file.to_str().expect("non UTF-8 file in base path");
+        let rel = abs
+            .strip_prefix(path_str)
+            .expect("file is not relative to base path")
+            .trim_start_matches(MAIN_SEPARATOR);
         #[cfg(any(clippy, test, doctest, feature = "test"))]
         tokens.push(quote!(audio_player::song::Compiled::empty(#rel)));
         #[cfg(all(not(clippy), not(test), not(doctest), not(feature = "test")))]
@@ -56,6 +62,9 @@ pub fn include_songs(input: TokenStream) -> TokenStream {
 /// Gets a [`String`] from a [`proc_macro::Literal`].
 ///
 /// Inspired from <https://docs.rs/include_dir_macros/0.7.4/src/include_dir_macros/lib.rs.html#31>.
+///
+/// # Panics
+/// Panics if the [`proc_macro::Literal`] doesn't contain a single string argument.
 fn unwrap_string_literal(lit: &proc_macro::Literal) -> String {
     let mut repr = lit.to_string();
     assert!(
