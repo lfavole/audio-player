@@ -1,8 +1,11 @@
 //! The implementation of the secret commands.
-use std::{io::Cursor, string::FromUtf8Error, sync::mpsc::SyncSender};
+use std::{io::Cursor, string::FromUtf8Error, sync::mpsc::Sender, time::Duration};
 
 use super::obfuscation::deobfuscate;
-use crate::{player::Command, song::EBox};
+use crate::{
+    player::{Command, StatusMessage},
+    song::EBox,
+};
 use chrono::{Datelike, Local};
 use rodio::{Decoder, OutputStream, Sink};
 
@@ -10,7 +13,7 @@ use rodio::{Decoder, OutputStream, Sink};
 ///
 /// # Errors
 /// Depends on the implementation of the [`Secret`]s.
-pub fn check_secrets(tx: &SyncSender<Command>, stack: &mut String) -> Result<(), EBox> {
+pub fn check_secrets(tx: &Sender<Command>, stack: &String) -> Result<(), EBox> {
     Secret1 {}.check(tx, stack)?;
     Ok(())
 }
@@ -19,7 +22,7 @@ pub fn check_secrets(tx: &SyncSender<Command>, stack: &mut String) -> Result<(),
 ///
 /// # Errors
 /// Depends on the implementation of the [`SecretOnce`]s.
-pub fn check_secrets_once(tx: &SyncSender<Command>) -> Result<(), EBox> {
+pub fn check_secrets_once(tx: &Sender<Command>) -> Result<(), EBox> {
     Secret2 {}.check(tx)?;
     Ok(())
 }
@@ -30,7 +33,7 @@ pub trait Secret {
     ///
     /// # Errors
     /// Depends on the implementation.
-    fn check(&mut self, tx: &SyncSender<Command>, stack: &mut String) -> Result<(), EBox> {
+    fn check(&mut self, tx: &Sender<Command>, stack: &String) -> Result<(), EBox> {
         if self.can_be_triggered(tx, stack)? {
             self.trigger(tx, stack)?;
         }
@@ -40,16 +43,12 @@ pub trait Secret {
     ///
     /// # Errors
     /// Depends on the implementation.
-    fn can_be_triggered(
-        &mut self,
-        tx: &SyncSender<Command>,
-        stack: &mut String,
-    ) -> Result<bool, EBox>;
+    fn can_be_triggered(&mut self, tx: &Sender<Command>, stack: &String) -> Result<bool, EBox>;
     /// Trigger the [`Secret`].
     ///
     /// # Errors
     /// Depends on the implementation.
-    fn trigger(&mut self, tx: &SyncSender<Command>, stack: &mut String) -> Result<(), EBox>;
+    fn trigger(&mut self, tx: &Sender<Command>, stack: &String) -> Result<(), EBox>;
 }
 
 /// A secret feature that triggers when the program starts.
@@ -58,7 +57,7 @@ pub trait SecretOnce {
     ///
     /// # Errors
     /// Depends on the implementation.
-    fn check(&mut self, tx: &SyncSender<Command>) -> Result<(), EBox> {
+    fn check(&mut self, tx: &Sender<Command>) -> Result<(), EBox> {
         if self.can_be_triggered(tx)? {
             self.trigger(tx)?;
         }
@@ -68,21 +67,17 @@ pub trait SecretOnce {
     ///
     /// # Errors
     /// Depends on the implementation.
-    fn can_be_triggered(&mut self, tx: &SyncSender<Command>) -> Result<bool, EBox>;
+    fn can_be_triggered(&mut self, tx: &Sender<Command>) -> Result<bool, EBox>;
     /// Trigger the [`Secret`].
     ///
     /// # Errors
     /// Depends on the implementation.
-    fn trigger(&mut self, tx: &SyncSender<Command>) -> Result<(), EBox>;
+    fn trigger(&mut self, tx: &Sender<Command>) -> Result<(), EBox>;
 }
 
 struct Secret1;
 impl Secret for Secret1 {
-    fn can_be_triggered(
-        &mut self,
-        _tx: &SyncSender<Command>,
-        stack: &mut String,
-    ) -> Result<bool, EBox> {
+    fn can_be_triggered(&mut self, _tx: &Sender<Command>, stack: &String) -> Result<bool, EBox> {
         let chars: Vec<u8> = "tblkqmvawbicfizraysbwftntbpyaypnnjhxtflo".into();
         let pwd_chars = deobfuscate(&chars);
         let pwd = String::from_utf8(pwd_chars)?;
@@ -96,7 +91,7 @@ impl Secret for Secret1 {
         Ok(stack.ends_with(&real_pwd))
     }
 
-    fn trigger(&mut self, tx: &SyncSender<Command>, _stack: &mut String) -> Result<(), EBox> {
+    fn trigger(&mut self, tx: &Sender<Command>, _stack: &String) -> Result<(), EBox> {
         tx.send(Command::ForcePause)?;
         let secret = include_bytes!("secret1.bin");
         let real_data = deobfuscate(secret);
@@ -106,6 +101,10 @@ impl Secret for Secret1 {
         sink.append(source);
         sink.sleep_until_end();
         tx.send(Command::RestorePlayback)?;
+        tx.send(Command::DisplayMessage(StatusMessage::with_duration(
+            decode_string(2, 31, false)?,
+            Duration::from_secs(2),
+        )))?;
         Ok(())
     }
 }
@@ -166,15 +165,17 @@ pub fn decode_number(a: usize, l: usize, r: bool) -> u32 {
 
 struct Secret2;
 impl SecretOnce for Secret2 {
-    fn can_be_triggered(&mut self, _tx: &SyncSender<Command>) -> Result<bool, EBox> {
+    fn can_be_triggered(&mut self, _tx: &Sender<Command>) -> Result<bool, EBox> {
         let n = d(decode_number(20, 3, false))?;
         let now = Local::now().date_naive();
         let (a, b) = (now.day(), now.month());
         Ok((a.saturating_sub(b) * (a + b)).saturating_sub(a + b) == n)
     }
 
-    fn trigger(&mut self, _tx: &SyncSender<Command>) -> Result<(), EBox> {
-        println!("{}", decode_string(23, 24, false)?);
+    fn trigger(&mut self, tx: &Sender<Command>) -> Result<(), EBox> {
+        tx.send(Command::DisplayMessage(StatusMessage::infinite(
+            decode_string(23, 24, false)?,
+        )))?;
         Ok(())
     }
 }

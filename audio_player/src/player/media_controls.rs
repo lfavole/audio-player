@@ -1,6 +1,6 @@
 //! Implementation for the media controls.
 use std::{
-    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    sync::mpsc::{sync_channel, Receiver, Sender},
     time::Duration,
 };
 
@@ -13,7 +13,11 @@ use super::{Command, Metadata};
 /// Register media controls.
 ///
 /// Inspired from <https://github.com/Sinono3/souvlaki#example>.
-pub fn media_controls(tx: SyncSender<Command>, status_rx: &Receiver<Metadata>, stop_rx: &Receiver<()>) -> Result<(), EBox> {
+pub fn media_controls(
+    tx: Sender<Command>,
+    status_rx: &Receiver<Metadata>,
+    stop_rx: &Receiver<()>,
+) -> Result<(), EBox> {
     #[cfg(target_os = "windows")]
     let hwnd = {
         use super::window::run_window;

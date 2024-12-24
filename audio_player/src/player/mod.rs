@@ -1,23 +1,25 @@
 //! The code for the random player.
 use std::{
-    sync::mpsc::sync_channel,
-    thread::{scope, sleep},
+    sync::mpsc::{channel, sync_channel},
+    thread::scope,
     time::{Duration, SystemTime},
 };
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
-use keyboard_controls::controls;
 use media_controls::media_controls;
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{Decoder, OutputStream, Sink, Source};
+use terminal_ui::{terminal_ui, PartialStatus};
 use tinyrand::{Rand, Seeded, StdRand, Wyrand};
 
 use crate::{
+    scroll_position::Scrollable,
     secrets::commands::check_secrets_once,
     song::{check_double_songs, EBox, Song},
 };
 
 mod keyboard_controls;
 mod media_controls;
+mod terminal_ui;
 #[cfg(windows)]
 pub mod window;
 
@@ -36,16 +38,65 @@ macro_rules! println_not_raw {
     };
 }
 
+/// A status message.
+#[derive(Clone)]
+#[must_use]
+pub struct StatusMessage {
+    /// The text of the message.
+    message: String,
+    /// The time when the message will be cleared (represented by a [`Duration`]).
+    max_time: SystemTime,
+}
+
+impl Default for StatusMessage {
+    fn default() -> Self {
+        Self {
+            message: String::new(),
+            max_time: SystemTime::UNIX_EPOCH,
+        }
+    }
+}
+
+impl StatusMessage {
+    /// Creates a new [`StatusMessage`].
+    pub fn new(message: String, max_time: SystemTime) -> Self {
+        Self { message, max_time }
+    }
+
+    /// Creates a new [`StatusMessage`] that is cleared after the given [`Duration`].
+    pub fn with_duration(message: String, duration: Duration) -> Self {
+        Self::new(message, SystemTime::now() + duration)
+    }
+
+    /// Creates a new [`StatusMessage`] that is cleared after 5 seconds.
+    pub fn five_seconds(message: String) -> Self {
+        Self::with_duration(message, Duration::from_secs(5))
+    }
+
+    /// Creates a new infinite [`StatusMessage`].
+    pub fn infinite(message: String) -> Self {
+        Self {
+            message,
+            // Quite infinite...
+            max_time: SystemTime::now() + Duration::from_secs(365 * 86400),
+        }
+    }
+}
+
 /// The status of an active player.
 pub(crate) struct Status {
     /// Should we go to the next song when the current one is finished?
-    pub change_pos: bool,
+    pub go_next: bool,
     /// The length of the queue.
     pub length: usize,
+    /// The messages stack.
+    pub messages: Vec<StatusMessage>,
     /// The actual position in the queue.
     pub position: usize,
     /// The random number generator to shuffle the queue.
     pub rng: Wyrand,
+    /// The position of the currently pointed element.
+    pub scrollbar_position: usize,
     /// Should we stop the player?
     pub stop: bool,
     /// Was the song paused before the call to [`Command::ForcePause`]?
@@ -68,6 +119,8 @@ impl Status {
 
 /// A command that can be sent to an active player to change its behavior.
 pub enum Command {
+    /// Displays a message.
+    DisplayMessage(StatusMessage),
     /// Pauses the player.
     ForcePause,
     /// Plays the next song.
@@ -78,12 +131,20 @@ pub enum Command {
     Play,
     /// Plays (or pauses) the player.
     PlayPause,
+    /// Plays the selected song.
+    PlaySelected,
     /// Plays the previous song.
     Previous,
     /// Closes the player.
     Quit,
+    /// Selects the currently playing song.
+    ResetScroll,
     /// Plays the player if it was previously playing before the [`Command::ForcePause`] command.
     RestorePlayback,
+    /// Selects one element down.
+    ScrollDown,
+    /// Selects one element up.
+    ScrollUp,
     /// Seeks backwards of the given duration.
     SeekLeft(Duration),
     /// Seeks forwards of the given duration.
@@ -98,9 +159,17 @@ static SEEK_STEP: Duration = Duration::from_secs(5);
 impl Command {
     /// Apply a command on a [`Sink`] and on a [`Status`].
     fn handle(self, sink: &Sink, status: &mut Status) {
+        let update_scrollbar_position = status.position == status.scrollbar_position;
+        let old_position = status.position;
+
         match self {
+            Self::DisplayMessage(message) => status.messages.insert(0, message),
             Self::ForcePause => sink.pause(),
-            Self::Next => sink.skip_one(),
+            Self::Next => {
+                status.go_next = false;
+                status.position += 1;
+                sink.skip_one();
+            }
             Self::Pause => {
                 sink.pause();
                 status.was_paused = true;
@@ -111,57 +180,62 @@ impl Command {
             }
             Self::PlayPause => {
                 if sink.is_paused() {
-                    sink.play();
-                    status.was_paused = false;
+                    Self::Play
                 } else {
-                    sink.pause();
-                    status.was_paused = true;
+                    Self::Pause
                 }
+                .handle(sink, status);
+            }
+            Self::PlaySelected => {
+                status.position = status.scrollbar_position;
+                status.go_next = false;
+                sink.skip_one();
+                Self::Play.handle(sink, status);
             }
             Self::Previous => {
+                status.go_next = false;
+                status.position = status.position.previous(status.length);
                 sink.skip_one();
-                status.change_pos = false;
-                if status.position == 0 {
-                    status.position = status.length;
-                } else {
-                    status.position -= 1;
-                }
             }
             Self::Quit => {
                 status.stop = true;
                 sink.skip_one();
             }
+            Self::ResetScroll => status.scrollbar_position = status.position,
             Self::RestorePlayback => {
                 if !status.was_paused {
                     sink.play();
                 }
             }
+            Self::ScrollDown => {
+                status.scrollbar_position = status.scrollbar_position.next(status.length);
+            }
+            Self::ScrollUp => {
+                status.scrollbar_position = status.scrollbar_position.previous(status.length);
+            }
             // Skip seeking if it's not supported
             Self::SeekLeft(duration) => {
                 if sink.get_pos() < Duration::from_secs(2) {
-                    sink.skip_one();
-                    status.change_pos = false;
-                    if status.position == 0 {
-                        status.position = status.length;
-                    } else {
-                        status.position -= 1;
-                    }
-                    return;
-                }
-                if let Err(err) = sink.try_seek(sink.get_pos().saturating_sub(duration)) {
-                    eprintln!("Seek failed: {err:?}");
+                    Self::Previous.handle(sink, status);
+                } else {
+                    Self::try_seek(sink, sink.get_pos().saturating_sub(duration), status);
                 }
             }
             Self::SeekRight(duration) => {
-                if let Err(err) = sink.try_seek(sink.get_pos().saturating_add(duration)) {
-                    eprintln!("Seek failed: {err:?}");
-                }
+                Self::try_seek(sink, sink.get_pos().saturating_add(duration), status);
             }
-            Self::SeekTo(pos) => {
-                if let Err(err) = sink.try_seek(pos) {
-                    eprintln!("Seek failed: {err:?}");
-                }
-            }
+            Self::SeekTo(pos) => Self::try_seek(sink, pos, status),
+        }
+
+        if old_position != status.position && update_scrollbar_position {
+            status.scrollbar_position = status.position;
+        }
+    }
+
+    fn try_seek(sink: &Sink, pos: Duration, status: &mut Status) {
+        if let Err(err) = sink.try_seek(pos) {
+            Self::DisplayMessage(StatusMessage::five_seconds(format!("Seek failed: {err:?}")))
+                .handle(sink, status);
         }
     }
 }
@@ -189,15 +263,15 @@ pub fn play_songs<'name, T: Song<'name> + 'name>(songs: &mut [T]) -> Result<(), 
             stop_rx
         };
 
-        let (status_tx, status_rx) = sync_channel(1);
+        let (metadata_tx, metadata_rx) = sync_channel(1);
 
-        let (tx, rx) = sync_channel(1);
-        let tx2 = tx.clone();
-        check_secrets_once(&tx.clone())?;
+        let (commands_tx, commands_rx) = channel();
+        let commands_tx2 = commands_tx.clone();
+
+        check_secrets_once(&commands_tx.clone())?;
+
         let stop_rx1 = get_stop_rx();
-        s.spawn(move || controls(&tx.clone(), &stop_rx1));
-        let stop_rx2 = get_stop_rx();
-        s.spawn(move || media_controls(tx2, &status_rx, &stop_rx2));
+        s.spawn(move || media_controls(commands_tx2, &metadata_rx, &stop_rx1));
 
         let rng = StdRand::seed(
             SystemTime::now()
@@ -215,42 +289,73 @@ pub fn play_songs<'name, T: Song<'name> + 'name>(songs: &mut [T]) -> Result<(), 
         }
 
         let mut status = Status {
-            change_pos: true,
+            go_next: true,
             length: queue.len(),
+            messages: vec![],
             position: queue.len(),
+            scrollbar_position: 0,
             rng,
             stop: false,
             was_paused: false,
         };
 
+        let (status_tx, status_rx) = sync_channel(1);
+        let stop_rx2 = get_stop_rx();
+        s.spawn(move || terminal_ui(&status_rx, &stop_rx2, &commands_tx));
+
+        let mut song_names: Vec<String>;
+
         'mainloop: loop {
             status.shuffle_if_needed(queue);
+            song_names = queue.iter().map(|x| x.get_path().to_string()).collect();
             let song = &mut queue[status.position];
-            println_not_raw!("{}", song.get_path());
 
             let source = Decoder::new_mp3(song.get_data()?)?;
+            let total_time = source.total_duration().unwrap_or(Duration::ZERO);
             sink.append(source);
 
-            status_tx.send(Metadata {
+            metadata_tx.send(Metadata {
                 title: song.get_path().to_owned(),
             })?;
 
             scope(|s2| -> Result<(), EBox> {
+                status.go_next = true;
+
                 if status.position + 1 != status.length {
                     let pending_song = &mut queue[status.position + 1];
                     s2.spawn(move || pending_song.preload());
                 }
 
+                let mut last_time = sink.get_pos();
                 while !sink.empty() {
-                    if let Ok(resp) = rx.try_recv() {
+                    while let Ok(resp) = commands_rx.try_recv() {
                         resp.handle(&sink, &mut status);
+                        last_time = Duration::MAX; // force update
                     }
-                    sleep(Duration::from_millis(100));
+                    if (last_time.abs_diff(sink.get_pos())) > Duration::from_secs(1) {
+                        last_time = sink.get_pos();
+                        let mut message = String::new();
+                        while !status.messages.is_empty() {
+                            if SystemTime::now() <= status.messages[0].max_time {
+                                message.clone_from(&status.messages[0].message);
+                                break;
+                            }
+                            let _ = status.messages.remove(0);
+                        }
+                        status_tx.send(PartialStatus {
+                            song_names: song_names.clone(),
+                            position: status.position,
+                            scrollbar_position: status.scrollbar_position,
+                            time: sink.get_pos(),
+                            total_time,
+                            paused: sink.is_paused(),
+                            message,
+                        })?;
+                    }
                 }
-                if status.change_pos {
-                    status.position += 1;
+                if status.go_next {
+                    Command::Next.handle(&sink, &mut status);
                 }
-                status.change_pos = true;
                 Ok(())
             })?;
             if status.stop {

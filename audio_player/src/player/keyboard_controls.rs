@@ -1,64 +1,65 @@
 //! Implementation for the keyboard controls.
-use std::{sync::mpsc::{Receiver, SyncSender}, time::Duration};
+use std::{sync::mpsc::Sender, time::Duration};
 
-use crossterm::{
-    event::{poll, read, Event, KeyCode, KeyEvent},
-    terminal::{disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::{poll, read, Event, KeyCode, KeyEvent};
 
 use crate::{secrets::commands::check_secrets, song::EBox};
 
 use super::{Command, SEEK_STEP};
 
-/// Reads the pressed keys and ask to perform the corresponding actions.
+/// Wait at most 100 milliseconds for an event and handle it.
 ///
 /// # Errors
-/// Fails if a key [`Event`] cannot be read.
-pub fn controls(tx: &SyncSender<Command>, stop_rx: &Receiver<()>) -> Result<(), EBox> {
-    enable_raw_mode()?;
-    let mut stack = String::with_capacity(50);
-    loop {
-        if poll(Duration::from_millis(100))? {
-            if let Event::Key(KeyEvent { code: keycode, .. }) = read()? {
-                match keycode {
-                    KeyCode::Char(char) => {
-                        match char {
-                            ' ' => {
-                                tx.send(Command::PlayPause)?;
-                            }
-                            'n' => {
-                                tx.send(Command::Next)?;
-                            }
-                            'p' => {
-                                tx.send(Command::Previous)?;
-                            }
-                            'q' => {
-                                tx.send(Command::Quit)?;
-                            }
-                            _ => {}
+/// Fails if sending a command fails or if a secret feature fails.
+pub fn handle_events(stack: &mut String, tx: &Sender<Command>) -> Result<(), EBox> {
+    while poll(Duration::from_millis(100))? {
+        let event = read()?;
+        if let Event::Key(KeyEvent { code: keycode, .. }) = event {
+            match keycode {
+                KeyCode::Char(char) => {
+                    match char {
+                        ' ' => {
+                            tx.send(Command::PlayPause)?;
                         }
-                        stack.push(char);
+                        'n' => {
+                            tx.send(Command::Next)?;
+                        }
+                        'p' => {
+                            tx.send(Command::Previous)?;
+                        }
+                        'q' => {
+                            tx.send(Command::Quit)?;
+                        }
+                        _ => {}
                     }
-                    KeyCode::Left => {
-                        tx.send(Command::SeekLeft(SEEK_STEP))?;
-                        stack.push('←');
-                    }
-                    KeyCode::Right => {
-                        tx.send(Command::SeekRight(SEEK_STEP))?;
-                        stack.push('→');
-                    }
-                    KeyCode::Media(c) => {
-                        println!("{c:?}");
-                    }
-                    _ => {}
+                    stack.push(char);
                 }
-                check_secrets(tx, &mut stack)?;
+                KeyCode::Left => {
+                    tx.send(Command::SeekLeft(SEEK_STEP))?;
+                    stack.push('←');
+                }
+                KeyCode::Right => {
+                    tx.send(Command::SeekRight(SEEK_STEP))?;
+                    stack.push('→');
+                }
+                KeyCode::Up => {
+                    tx.send(Command::ScrollUp)?;
+                    stack.push('↑');
+                }
+                KeyCode::Down => {
+                    tx.send(Command::ScrollDown)?;
+                    stack.push('↓');
+                }
+                KeyCode::Esc => {
+                    tx.send(Command::ResetScroll)?;
+                }
+                KeyCode::Enter => {
+                    tx.send(Command::PlaySelected)?;
+                }
+                _ => {}
             }
-        }
-        if stop_rx.try_recv().is_ok() {
-            break;
+            check_secrets(tx, stack)?;
         }
     }
-    disable_raw_mode()?;
     Ok(())
 }
