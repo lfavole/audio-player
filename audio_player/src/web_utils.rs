@@ -10,13 +10,18 @@ use crate::song::EBox;
 struct LinksIterator<'content> {
     /// The webpage content that hasn't been parsed yet.
     content: &'content str,
+    /// The previous link (to avoid duplicates).
+    previous_link: &'content str,
 }
 
 impl<'content> LinksIterator<'content> {
     /// Creates a new [`LinksIterator`] on the given HTML `content`.
     #[must_use]
     fn new(content: &'content str) -> Self {
-        Self { content }
+        Self {
+            content,
+            previous_link: "",
+        }
     }
     /// Remove `bytes` bytes at the start of the content and return them.
     fn eat(&mut self, bytes: usize) -> &'content str {
@@ -76,8 +81,14 @@ impl<'content> Iterator for LinksIterator<'content> {
                 };
                 // If there is a closing quote (or a space, or a tag end)...
                 if let Some(end_index) = self.content.find(&end_chars[..]) {
+                    let link = self.eat(end_index);
+                    // Don't return duplicate links
+                    if link == self.previous_link {
+                        continue;
+                    }
+                    self.previous_link = link;
                     // Save the link
-                    return Some(self.eat(end_index));
+                    return Some(link);
                 }
             }
             break;
