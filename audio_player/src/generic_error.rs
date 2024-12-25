@@ -27,7 +27,7 @@ impl From<&dyn ToString> for GenericError {
 
 impl From<souvlaki::Error> for GenericError {
     fn from(value: souvlaki::Error) -> Self {
-        Self(format!("{value}"))
+        Self(format!("{value:?}"))
     }
 }
 
