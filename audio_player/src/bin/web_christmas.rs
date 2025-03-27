@@ -2,4 +2,4 @@
 
 use audio_player::web;
 use compile_dotenv::compile_env;
-web!(compile_env!("WEB_CHRISTMAS_URL"));
+web!(compile_env!("WEB_CHRISTMAS_URL"), true);

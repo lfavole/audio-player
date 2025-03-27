@@ -13,6 +13,8 @@ idna_adapter = "=1.0.0"
 macros = { path = "../macros" }
 ratatui = "0.28.0"
 rodio = { version = "0.20.1", default-features = false, features = ["symphonia-mp3"] }
+rustls = "0.23.21"
+rustls-pki-types = "1.10.1"
 souvlaki = "0.7.3"
 tinyrand = "0.5.0"
 ureq = "2.10.1"
