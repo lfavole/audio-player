@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 chrono = "0.4.38"
+compile-dotenv = "0.1.0"
 crossterm = { version = "0.28.1", default-features = false, features = ["events", "windows"] }
 files = { path = "../files" }
 # Disable IDNA

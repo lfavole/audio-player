@@ -3,7 +3,7 @@
 /// Plays the songs from a specified URL.
 #[macro_export]
 macro_rules! web {
-    ($url:tt) => {
+    ($url:expr) => {
         use ureq::Agent;
         use url::Url;
         use $crate::player::play_songs;

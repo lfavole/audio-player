@@ -1,4 +1,5 @@
 //! Play the Christmas songs from a specified URL.
 
 use audio_player::web;
-web!("http://127.0.0.1:8000/");
+use compile_dotenv::compile_env;
+web!(compile_env!("WEB_CHRISTMAS_URL"));
